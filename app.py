@@ -70,10 +70,8 @@
 #     st.success(f"Predicted winner: **{winner}**")
 #     st.progress(float(team1_prob), text=f"{team1} win probability")
 
-
 import streamlit as st
 import pandas as pd
-import os
 from sklearn.model_selection import train_test_split
 from sklearn.linear_model import LogisticRegression
 from sklearn.preprocessing import LabelEncoder
@@ -82,63 +80,51 @@ st.set_page_config(page_title="Cricket Match Predictor", page_icon="🏏")
 st.title("🏏 IPL Match Outcome Predictor")
 st.markdown("Fill in the match details below to predict the winner.")
 
-# Train once and store in session_state (no file writing needed)
-if "model" not in st.session_state:
-    with st.spinner("Setting up model for first time... this takes ~30 seconds."):
-        try:
-            df = pd.read_csv("matches.csv")
-            df = df[df['winner'].notna()]
-            df = df[df['result'] != 'tie']
+@st.cache_resource
+def train_model():
+    df = pd.read_csv("matches.csv")
+    df = df[df['winner'].notna()]
+    df = df[df['result'] != 'tie']
 
-            df['toss_bat'] = (df['toss_decision'] == 'bat').astype(int)
-            df['team1_won_toss'] = (df['toss_winner'] == df['team1']).astype(int)
-            df['team1_won'] = (df['winner'] == df['team1']).astype(int)
+    df['toss_bat'] = (df['toss_decision'] == 'bat').astype(int)
+    df['team1_won_toss'] = (df['toss_winner'] == df['team1']).astype(int)
+    df['team1_won'] = (df['winner'] == df['team1']).astype(int)
 
-            le_team = LabelEncoder()
-            le_venue = LabelEncoder()
-            le_team.fit(pd.concat([df['team1'], df['team2']]))
-            le_venue.fit(df['venue'])
+    le_team = LabelEncoder()
+    le_venue = LabelEncoder()
+    le_team.fit(pd.concat([df['team1'], df['team2']]))
+    le_venue.fit(df['venue'])
 
-            df['team1_enc'] = le_team.transform(df['team1'])
-            df['team2_enc'] = le_team.transform(df['team2'])
-            df['venue_enc'] = le_venue.transform(df['venue'])
+    df['team1_enc'] = le_team.transform(df['team1'])
+    df['team2_enc'] = le_team.transform(df['team2'])
+    df['venue_enc'] = le_venue.transform(df['venue'])
 
-            X = df[['team1_enc', 'team2_enc', 'venue_enc', 'toss_bat', 'team1_won_toss']]
-            y = df['team1_won']
+    X = df[['team1_enc', 'team2_enc', 'venue_enc', 'toss_bat', 'team1_won_toss']]
+    y = df['team1_won']
 
-            X_train, X_test, y_train, y_test = train_test_split(
-                X, y, test_size=0.2, random_state=42
-            )
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y, test_size=0.2, random_state=42
+    )
 
-            model = LogisticRegression(max_iter=1000)
-            model.fit(X_train, y_train)
+    model = LogisticRegression(max_iter=1000)
+    model.fit(X_train, y_train)
 
-            # Store in session state — no pickle file needed
-            st.session_state["model"] = model
-            st.session_state["le_team"] = le_team
-            st.session_state["le_venue"] = le_venue
+    return model, le_team, le_venue
 
-        except Exception as e:
-            st.error(f"Training failed: {e}")
-            st.stop()
-
-# Retrieve from session state
-model    = st.session_state["model"]
-le_team  = st.session_state["le_team"]
-le_venue = st.session_state["le_venue"]
+with st.spinner("Loading model..."):
+    model, le_team, le_venue = train_model()
 
 teams  = list(le_team.classes_)
 venues = list(le_venue.classes_)
 
-# UI
 col1, col2 = st.columns(2)
 with col1:
     team1 = st.selectbox("Team 1 (home)", teams)
 with col2:
     team2 = st.selectbox("Team 2 (away)", [t for t in teams if t != team1])
 
-venue        = st.selectbox("Venue", venues)
-toss_winner  = st.radio("Toss won by", [team1, team2])
+venue         = st.selectbox("Venue", venues)
+toss_winner   = st.radio("Toss won by", [team1, team2])
 toss_decision = st.radio("Toss decision", ["bat", "field"])
 
 if st.button("Predict winner"):
